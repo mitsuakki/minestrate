@@ -1,26 +1,28 @@
+env: dev
+
 server:
   port: 8080
   tls_cert: /etc/minestrate/cert.pem
-  tls_key:  /etc/minestrate/key.pem
+  tls_key: /etc/minestrate/key.pem
 
 auth:
   jwt_secret: "your-secret"
-  token_ttl:  300
+  token_ttl: 300
 
 docker:
-  socket:       /var/run/docker.sock
-  image:        pmmp/pocketmine-mp:latest
-  cpu_limit:    1.0
+  socket: /var/run/docker.sock
+  image: pmmp/pocketmine-mp:latest
+  cpu_limit: 1.0
   memory_limit: 512m
 
 orchestrator:
-  workers:       4
-  max_servers:   100
+  workers: 4
+  max_servers: 100
   start_timeout: 30
 
 ports:
   range_start: 19132
-  range_end:   20132
+  range_end: 20132
 
 network:
   subnet_block: 172.20.0.0/14
