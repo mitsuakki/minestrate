@@ -1,21 +1,79 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"log"
+	"net/http"
 	"os"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/mitsuakki/minestrate/config"
+	"github.com/mitsuakki/minestrate/internal/api"
+	"github.com/mitsuakki/minestrate/internal/auth"
+	"github.com/mitsuakki/minestrate/internal/middleware"
 )
 
 func main() {
+	configPath := flag.String("config", "config.yaml", "path to config file")
+	version := flag.Bool("version", false, "print version")
+	flag.Parse()
+
 	if len(os.Args) < 2 {
 		fmt.Println("Isolated Minecraft minigame servers, on demand. REST API over Docker, written in Go.")
 		return
 	}
 
-	switch os.Args[1] {
-	case "--version":
+	if *version {
 		fmt.Println("Version: dev")
-
-	default:
-		fmt.Println("unknown command")
+		return
 	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+
+	if cfg.Env == "dev" {
+		claims := &auth.Claims{
+			Scope: []string{"server:create"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+				NotBefore: jwt.NewNumericDate(time.Now()),
+				Issuer:    "minestrate-dev",
+				Subject:   "admin",
+			},
+		}
+
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		ss, err := token.SignedString([]byte(cfg.Auth.JWTSecret))
+		if err != nil {
+			log.Printf("failed to generate dev token: %v", err)
+		} else {
+			fmt.Printf("Dev JWT: %s\n", ss)
+		}
+	}
+
+	r := chi.NewRouter()
+
+	// ToDo : Public routes
+
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Auth(cfg.Auth.JWTSecret))
+
+		r.Get("/servers", api.ListServers)
+		r.With(middleware.RequireScope("server:create")).Post("/servers", api.CreateServer)
+	})
+
+	addr := fmt.Sprintf(":%d", cfg.Server.Port)
+	fmt.Printf("Starting server on %s\n", addr)
+
+	if cfg.Server.TLSCert != "" && cfg.Server.TLSKey != "" {
+		log.Fatal(http.ListenAndServeTLS(addr, cfg.Server.TLSCert, cfg.Server.TLSKey, r))
+	}
+
+	log.Fatal(http.ListenAndServe(addr, r))
 }
