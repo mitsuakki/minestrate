@@ -13,10 +13,6 @@ help:
 	@echo 'Usage:'
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' |  sed -e 's/^/ /'
 
-.PHONY: confirm
-confirm:
-	@echo -n 'Are you sure? [y/N] ' && read ans && [ $${ans:-N} = y ]
-
 .PHONY: no-dirty
 no-dirty:
 	@test -z "$(shell git status --porcelain)"
@@ -72,15 +68,6 @@ build:
 .PHONY: run
 run: build
 	/tmp/bin/${binary_name}
-
-## run/live: run the application with hot-reloading (Air)
-.PHONY: run/live
-run/live:
-	go run github.com/cosmtrek/air@v1.43.0 \
-		--build.cmd "make build" --build.bin "/tmp/bin/${binary_name}" --build.delay "100" \
-		--build.exclude_dir "" \
-		--build.include_ext "go, tpl, tmpl, html, css, scss, js, ts, sql, jpeg, jpg, gif, png, bmp, svg, webp, ico" \
-		--misc.clean_on_exit "true"
 
 # ==================================================================================== #
 # DOCKER
