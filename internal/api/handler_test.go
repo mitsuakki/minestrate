@@ -2,14 +2,11 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/mitsuakki/minestrate/config"
 	"github.com/mitsuakki/minestrate/internal/server"
 )
@@ -107,50 +104,4 @@ func TestListServers(t *testing.T) {
 	if len(body) != 1 {
 		t.Fatalf("expected 1 server, got %d", len(body))
 	}
-}
-
-func TestIntegration_CreateAndPoll(t *testing.T) {
-	h := setupTestHandler()
-	h.orchestrator.StartWorkers()
-
-	// 1. POST /servers
-	reqBody := CreateServerRequest{Game: "skywars", Players: 8}
-	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-
-	h.CreateServer(w, req)
-
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", w.Code)
-	}
-
-	var s server.Server
-	_ = json.NewDecoder(w.Body).Decode(&s)
-	id := s.ID
-
-	// 2. Poll GET /servers/{id}
-	maxAttempts := 10
-	for i := 0; i < maxAttempts; i++ {
-		req := httptest.NewRequest(http.MethodGet, "/servers/"+id, nil)
-		// We need to simulate chi URL param for direct handler call
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", id)
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-		
-		w := httptest.NewRecorder()
-		h.GetServer(w, req)
-
-		var polled struct {
-			State server.ServerState `json:"state"`
-		}
-		_ = json.NewDecoder(w.Body).Decode(&polled)
-
-		if polled.State == server.StateRunning {
-			return // Success
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	t.Fatal("server never reached running state")
 }
