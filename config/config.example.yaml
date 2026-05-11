@@ -2,6 +2,7 @@ env: dev
 
 server:
   port: 8080
+  host_ip: 127.0.0.1
   tls_cert: /etc/minestrate/cert.pem
   tls_key: /etc/minestrate/key.pem
 
