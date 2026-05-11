@@ -41,7 +41,7 @@ func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
 
 	s, err := h.orchestrator.CreateServer(req.Game, req.Players)
 	if err != nil {
-		if err.Error() == "max servers reached" || err.Error() == "no ports available" {
+		if err.Error() == "max servers reached" || err.Error() == "no ports available" || err.Error() == "job queue full" {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
