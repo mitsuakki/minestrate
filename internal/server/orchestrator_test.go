@@ -1,6 +1,7 @@
 package server
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -125,6 +126,73 @@ func TestGetAndListServers(t *testing.T) {
 	}
 	if list[0] != s1 {
 		t.Fatal("server in list mismatch")
+	}
+}
+
+func TestCreateServer_RaceCondition(t *testing.T) {
+	cfg := mockConfig()
+	cfg.Orchestrator.MaxServers = 1
+	cfg.Ports.RangeEnd = 25570 // Enough ports
+	o := NewOrchestrator(cfg)
+
+	const numGoroutines = 50
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	errors := make(chan error, numGoroutines)
+	servers := make(chan *Server, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			s, err := o.CreateServer("minecraft", 10)
+			if err != nil {
+				errors <- err
+				return
+			}
+			servers <- s
+		}()
+	}
+
+	wg.Wait()
+	close(errors)
+	close(servers)
+
+	createdCount := len(servers)
+	if createdCount > cfg.Orchestrator.MaxServers {
+		t.Errorf("Exceeded MaxServers: created %d, limit %d", createdCount, cfg.Orchestrator.MaxServers)
+	}
+}
+
+func TestCreateServer_Backpressure(t *testing.T) {
+	cfg := mockConfig()
+	cfg.Orchestrator.MaxServers = 10
+	cfg.Orchestrator.Workers = 0 // No workers to drain the queue
+	o := NewOrchestrator(cfg)
+	
+	// Set a small job queue for testing
+	o.jobQueue = make(chan *Server, 1)
+
+	// Fill the queue
+	_, err := o.CreateServer("minecraft", 10)
+	if err != nil {
+		t.Fatalf("Failed to create first server: %v", err)
+	}
+
+	// Try to create another one, should return error instead of blocking
+	errChan := make(chan error, 1)
+	go func() {
+		_, err := o.CreateServer("minecraft", 10)
+		errChan <- err
+	}()
+
+	select {
+	case err := <-errChan:
+		if err == nil || err.Error() != "job queue full" {
+			t.Fatalf("Expected 'job queue full' error, got %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("CreateServer blocked instead of returning error")
 	}
 }
 

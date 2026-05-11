@@ -40,23 +40,36 @@ func (o *Orchestrator) CreateServer(game string, players int) (*Server, error) {
 		o.serversMutex.Unlock()
 		return nil, errors.New("max servers reached")
 	}
-	o.serversMutex.Unlock()
 
 	port, err := o.reservePort()
 	if err != nil {
+		o.serversMutex.Unlock()
 		return nil, err
 	}
 
 	id := uuid.New().String()
 	s := NewServer(id, game, players, "127.0.0.1", port)
 
-	o.serversMutex.Lock()
 	o.servers[id] = s
 	o.serversMutex.Unlock()
 
-	o.jobQueue <- s
+	select {
+	case o.jobQueue <- s:
+		return s, nil
+	default:
+		// Cleanup if queue is full
+		o.serversMutex.Lock()
+		delete(o.servers, id)
+		o.serversMutex.Unlock()
+		o.releasePort(port)
+		return nil, errors.New("job queue full")
+	}
+}
 
-	return s, nil
+func (o *Orchestrator) releasePort(port int) {
+	o.portsMutex.Lock()
+	defer o.portsMutex.Unlock()
+	o.availablePorts = append(o.availablePorts, port)
 }
 
 func (o *Orchestrator) reservePort() (int, error) {
