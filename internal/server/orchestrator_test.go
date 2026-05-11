@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -60,11 +61,8 @@ func TestCreateServer(t *testing.T) {
 
 	// Max servers reached
 	s3, err := o.CreateServer("minecraft", 5)
-	if err == nil {
-		t.Fatal("expected error when max servers reached, got nil")
-	}
-	if err.Error() != "max servers reached" {
-		t.Fatalf("expected 'max servers reached' error, got %v", err)
+	if !errors.Is(err, ErrMaxServersReached) {
+		t.Fatalf("expected ErrMaxServersReached, got %v", err)
 	}
 	if s3 != nil {
 		t.Fatal("expected nil server when max servers reached")
@@ -87,11 +85,8 @@ func TestCreateServer_NoPorts(t *testing.T) {
 
 	// No ports available
 	s3, err := o.CreateServer("minecraft", 10)
-	if err == nil {
-		t.Fatal("expected error when no ports available, got nil")
-	}
-	if err.Error() != "no ports available" {
-		t.Fatalf("expected 'no ports available' error, got %v", err)
+	if !errors.Is(err, ErrNoPortsAvailable) {
+		t.Fatalf("expected ErrNoPortsAvailable, got %v", err)
 	}
 	if s3 != nil {
 		t.Fatal("expected nil server when no ports available")
@@ -188,10 +183,11 @@ func TestCreateServer_Backpressure(t *testing.T) {
 
 	select {
 	case err := <-errChan:
-		if err == nil || err.Error() != "job queue full" {
-			t.Fatalf("Expected 'job queue full' error, got %v", err)
+		if !errors.Is(err, ErrJobQueueFull) {
+			t.Fatalf("expected ErrJobQueueFull, got %v", err)
 		}
 	case <-time.After(100 * time.Millisecond):
+
 		t.Fatal("CreateServer blocked instead of returning error")
 	}
 }

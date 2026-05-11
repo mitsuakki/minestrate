@@ -1,7 +1,6 @@
 package server
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -38,7 +37,7 @@ func (o *Orchestrator) CreateServer(game string, players int) (*Server, error) {
 	o.serversMutex.Lock()
 	if len(o.servers) >= o.cfg.Orchestrator.MaxServers {
 		o.serversMutex.Unlock()
-		return nil, errors.New("max servers reached")
+		return nil, ErrMaxServersReached
 	}
 
 	port, err := o.reservePort()
@@ -62,7 +61,7 @@ func (o *Orchestrator) CreateServer(game string, players int) (*Server, error) {
 		delete(o.servers, id)
 		o.serversMutex.Unlock()
 		o.releasePort(port)
-		return nil, errors.New("job queue full")
+		return nil, ErrJobQueueFull
 	}
 }
 
@@ -77,7 +76,7 @@ func (o *Orchestrator) reservePort() (int, error) {
 	defer o.portsMutex.Unlock()
 
 	if len(o.availablePorts) == 0 {
-		return 0, errors.New("no ports available")
+		return 0, ErrNoPortsAvailable
 	}
 
 	port := o.availablePorts[0]

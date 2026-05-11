@@ -40,7 +40,7 @@ func TestCreateServer(t *testing.T) {
 			t.Fatalf("expected status %d, got %d", http.StatusAccepted, res.StatusCode)
 		}
 
-		var respBody server.Server
+		var respBody ServerResponse
 		if err := json.NewDecoder(res.Body).Decode(&respBody); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -95,7 +95,7 @@ func TestListServers(t *testing.T) {
 		t.Errorf("Expected status OK, got %d", res.StatusCode)
 	}
 
-	var body []*server.Server
+	var body []ServerResponse
 	err := json.NewDecoder(res.Body).Decode(&body)
 	if err != nil {
 		t.Fatal(err)

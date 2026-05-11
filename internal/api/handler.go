@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -15,11 +16,6 @@ type Handler struct {
 
 func NewHandler(o *server.Orchestrator) *Handler {
 	return &Handler{orchestrator: o}
-}
-
-type CreateServerRequest struct {
-	Game    string `json:"game"`
-	Players int    `json:"players"`
 }
 
 func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +37,9 @@ func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
 
 	s, err := h.orchestrator.CreateServer(req.Game, req.Players)
 	if err != nil {
-		if err.Error() == "max servers reached" || err.Error() == "no ports available" || err.Error() == "job queue full" {
+		if errors.Is(err, server.ErrMaxServersReached) ||
+			errors.Is(err, server.ErrNoPortsAvailable) ||
+			errors.Is(err, server.ErrJobQueueFull) {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
@@ -51,14 +49,14 @@ func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(s)
+	_ = json.NewEncoder(w).Encode(ToServerResponse(s))
 }
 
 func (h *Handler) ListServers(w http.ResponseWriter, r *http.Request) {
 	servers := h.orchestrator.ListServers()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(servers)
+	_ = json.NewEncoder(w).Encode(ToServerListResponse(servers))
 }
 
 func (h *Handler) GetServer(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +69,6 @@ func (h *Handler) GetServer(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(s)
+	_ = json.NewEncoder(w).Encode(ToServerResponse(s))
 }
 
