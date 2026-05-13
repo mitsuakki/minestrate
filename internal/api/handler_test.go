@@ -2,11 +2,13 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/mitsuakki/minestrate/config"
 	"github.com/mitsuakki/minestrate/internal/server"
 )
@@ -104,4 +106,49 @@ func TestListServers(t *testing.T) {
 	if len(body) != 1 {
 		t.Fatalf("expected 1 server, got %d", len(body))
 	}
+}
+
+func TestDeleteServer(t *testing.T) {
+	h := setupTestHandler()
+
+	t.Run("Success", func(t *testing.T) {
+		s, _ := h.orchestrator.CreateServer("skywars", 8)
+
+		req := httptest.NewRequest(http.MethodDelete, "/servers/"+s.ID, nil)
+		
+		// Setup Chi context
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", s.ID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		
+		w := httptest.NewRecorder()
+
+		h.DeleteServer(w, req)
+
+		if w.Code != http.StatusAccepted {
+			t.Errorf("expected status 202, got %d", w.Code)
+		}
+
+		// Verify it's gone
+		_, found := h.orchestrator.GetServer(s.ID)
+		if found {
+			t.Error("expected server to be deleted")
+		}
+	})
+
+	t.Run("NotFound", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodDelete, "/servers/nonexistent", nil)
+		
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "nonexistent")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		w := httptest.NewRecorder()
+
+		h.DeleteServer(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", w.Code)
+		}
+	})
 }

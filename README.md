@@ -174,6 +174,18 @@ network:
   subnet_block: 172.20.0.0/14
 ```
 
+## Metrics
+
+On this hardware (**AMD Ryzen 7 4800H**, 8 Cores, 16GB RAM, Windows 11 Pro), the mean Docker container start time ($\mu$) was measured using a baseline `alpine` image:
+
+| Metric | Value |
+| :--- | :--- |
+| Mean start time ($1/\mu$) | 1.18s |
+| Throughput ($\mu$) | 0.85 starts/sec |
+
+
+These values are used to tune the worker pool size and start timeout as described in the Design Decisions section.
+
 ## License
 
 MIT
