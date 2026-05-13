@@ -62,16 +62,20 @@ func (o *Orchestrator) CreateServer(game string, players int) (*Server, error) {
 
 func (o *Orchestrator) StopServer(id string) error {
 	o.serversMutex.Lock()
+	defer o.serversMutex.Unlock()
+
 	s, ok := o.servers[id]
 	if !ok {
-		o.serversMutex.Unlock()
 		return fmt.Errorf("server %s not found", id)
 	}
-	delete(o.servers, id)
-	o.serversMutex.Unlock()
 
+	if err := s.Transition(EventStop); err != nil {
+		return err
+	}
+
+	delete(o.servers, id)
 	o.ports.Release(s.Port)
-	return s.Transition(EventStop)
+	return nil
 }
 
 func (o *Orchestrator) GetServer(id string) (*Server, bool) {

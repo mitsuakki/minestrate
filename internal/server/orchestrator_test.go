@@ -210,3 +210,93 @@ func TestMultipleWorkers(t *testing.T) {
 		t.Fatalf("s2: expected running, got %s", s2.State())
 	}
 }
+
+func TestStopRunningServer(t *testing.T) {
+	cfg := mockConfig()
+	cfg.Orchestrator.Workers = 1
+	o := NewOrchestrator(cfg)
+	o.StartWorkers()
+
+	s, err := o.CreateServer("minecraft", 10)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Wait for worker to advance state to running
+	time.Sleep(200 * time.Millisecond)
+
+	if s.State() != StateRunning {
+		t.Fatalf("expected state running, got %s", s.State())
+	}
+
+	err = o.StopServer(s.ID)
+	if err != nil {
+		t.Fatalf("expected StopServer to succeed for running server, got error: %v", err)
+	}
+
+	if s.State() != StateStopped {
+		t.Fatalf("expected state stopped, got %s", s.State())
+	}
+}
+
+func TestStopStartingServer(t *testing.T) {
+	cfg := mockConfig()
+	cfg.Orchestrator.Workers = 1
+	o := NewOrchestrator(cfg)
+	// Don't start workers yet, so we can control the transition
+
+	s, err := o.CreateServer("minecraft", 10)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Manually transition to starting
+	err = s.Transition(EventStart)
+	if err != nil {
+		t.Fatalf("failed to transition to starting: %v", err)
+	}
+
+	if s.State() != StateStarting {
+		t.Fatalf("expected state starting, got %s", s.State())
+	}
+
+	err = o.StopServer(s.ID)
+	if err != nil {
+		t.Fatalf("expected StopServer to succeed for starting server, got error: %v", err)
+	}
+
+	if s.State() != StateStopped {
+		t.Fatalf("expected state stopped, got %s", s.State())
+	}
+}
+
+func TestStopServer_Inconsistency(t *testing.T) {
+	cfg := mockConfig()
+	o := NewOrchestrator(cfg)
+
+	s, err := o.CreateServer("minecraft", 10)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Manually transition to Stopped state.
+	// We use a trick: transition to Stopped makes future EventStop fail.
+	// But we need to keep it in the orchestrator.
+	err = s.Transition(EventStop) 
+	if err != nil {
+		t.Fatalf("failed to transition to stopped: %v", err)
+	}
+	
+	// Now it's stopped, but still in o.servers (because we didn't use StopServer yet).
+	// Calling StopServer should fail because Stopped -> Stopped via EventStop is invalid.
+	err = o.StopServer(s.ID)
+	if err == nil {
+		t.Fatal("expected StopServer to fail for already stopped server")
+	}
+
+	// Verify inconsistency: Is it still in the orchestrator?
+	_, found := o.GetServer(s.ID)
+	if !found {
+		t.Error("BUG: server was removed from orchestrator even though StopServer failed")
+	}
+}
