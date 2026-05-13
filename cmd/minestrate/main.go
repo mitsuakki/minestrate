@@ -71,6 +71,7 @@ func main() {
 
 		r.Get("/servers", h.ListServers)
 		r.Get("/servers/{id}", h.GetServer)
+		r.Delete("/servers/{id}", h.DeleteServer)
 		r.With(middleware.RequireScope("server:create")).Post("/servers", h.CreateServer)
 	})
 
