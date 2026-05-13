@@ -13,8 +13,7 @@ type Orchestrator struct {
 	cfg           *config.Config
 	servers       map[string]*Server
 	serversMutex  sync.RWMutex
-	availablePorts []int
-	portsMutex    sync.Mutex
+	ports         *PortAllocator
 	jobQueue      chan *Server
 }
 
@@ -22,12 +21,8 @@ func NewOrchestrator(cfg *config.Config) *Orchestrator {
 	o := &Orchestrator{
 		cfg:      cfg,
 		servers:  make(map[string]*Server),
+		ports:    NewPortAllocator(cfg.Ports.RangeStart, cfg.Ports.RangeEnd),
 		jobQueue: make(chan *Server, 100),
-	}
-
-	// Initialize ports
-	for i := cfg.Ports.RangeStart; i <= cfg.Ports.RangeEnd; i++ {
-		o.availablePorts = append(o.availablePorts, i)
 	}
 
 	return o
@@ -40,7 +35,7 @@ func (o *Orchestrator) CreateServer(game string, players int) (*Server, error) {
 		return nil, ErrMaxServersReached
 	}
 
-	port, err := o.reservePort()
+	port, err := o.ports.Acquire()
 	if err != nil {
 		o.serversMutex.Unlock()
 		return nil, err
@@ -60,28 +55,23 @@ func (o *Orchestrator) CreateServer(game string, players int) (*Server, error) {
 		o.serversMutex.Lock()
 		delete(o.servers, id)
 		o.serversMutex.Unlock()
-		o.releasePort(port)
+		o.ports.Release(port)
 		return nil, ErrJobQueueFull
 	}
 }
 
-func (o *Orchestrator) releasePort(port int) {
-	o.portsMutex.Lock()
-	defer o.portsMutex.Unlock()
-	o.availablePorts = append(o.availablePorts, port)
-}
-
-func (o *Orchestrator) reservePort() (int, error) {
-	o.portsMutex.Lock()
-	defer o.portsMutex.Unlock()
-
-	if len(o.availablePorts) == 0 {
-		return 0, ErrNoPortsAvailable
+func (o *Orchestrator) StopServer(id string) error {
+	o.serversMutex.Lock()
+	s, ok := o.servers[id]
+	if !ok {
+		o.serversMutex.Unlock()
+		return fmt.Errorf("server %s not found", id)
 	}
+	delete(o.servers, id)
+	o.serversMutex.Unlock()
 
-	port := o.availablePorts[0]
-	o.availablePorts = o.availablePorts[1:]
-	return port, nil
+	o.ports.Release(s.Port)
+	return s.Transition(EventStop)
 }
 
 func (o *Orchestrator) GetServer(id string) (*Server, bool) {

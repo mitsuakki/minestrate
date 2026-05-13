@@ -28,11 +28,8 @@ func TestNewOrchestrator(t *testing.T) {
 	if o.cfg != cfg {
 		t.Fatal("expected config to be set")
 	}
-	if len(o.availablePorts) != 2 {
-		t.Fatalf("expected 2 available ports, got %d", len(o.availablePorts))
-	}
-	if o.availablePorts[0] != 25565 || o.availablePorts[1] != 25566 {
-		t.Fatal("port range initialization failed")
+	if o.ports == nil {
+		t.Fatal("expected port allocator to be initialized")
 	}
 }
 
