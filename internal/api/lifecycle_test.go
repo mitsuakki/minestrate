@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moby/moby/api/types/network"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/go-chi/chi/v5"
 	"github.com/mitsuakki/minestrate/config"
 	"github.com/mitsuakki/minestrate/internal/api"
@@ -19,10 +21,16 @@ import (
 
 type mockDockerClient struct{}
 
-func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateRequest) (network.CreateResponse, error) {
+func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error) {
 	return network.CreateResponse{ID: name}, nil
 }
 func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) error {
+	return nil
+}
+func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
+	return container.CreateResponse{ID: containerName}, nil
+}
+func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
 	return nil
 }
 

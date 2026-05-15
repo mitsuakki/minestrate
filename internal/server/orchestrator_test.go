@@ -12,10 +12,10 @@ import (
 
 func mockConfig() *config.Config {
 	cfg := &config.Config{}
-	cfg.Orchestrator.MaxServers = 2
-	cfg.Orchestrator.Workers = 1
+	cfg.Orchestrator.MaxServers = 10
+	cfg.Orchestrator.Workers = 10
 	cfg.Ports.RangeStart = 25565
-	cfg.Ports.RangeEnd = 25566
+	cfg.Ports.RangeEnd = 25600
 	cfg.Network.Mode = "simple"
 	cfg.Network.DefaultNetwork = "test-net"
 	return cfg
@@ -41,6 +41,9 @@ func TestNewOrchestrator(t *testing.T) {
 
 func TestCreateServer(t *testing.T) {
 	cfg := mockConfig()
+	cfg.Orchestrator.MaxServers = 2
+	cfg.Orchestrator.Workers = 2
+	cfg.Ports.RangeEnd = 25570
 	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 
 	s1, err := o.CreateServer(context.Background(), "minecraft", 10)
@@ -75,6 +78,8 @@ func TestCreateServer(t *testing.T) {
 func TestCreateServer_NoPorts(t *testing.T) {
 	cfg := mockConfig()
 	cfg.Orchestrator.MaxServers = 5
+	cfg.Orchestrator.Workers = 5
+	cfg.Ports.RangeEnd = 25566 // Only 2 ports
 	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 
 	_, err := o.CreateServer(context.Background(), "minecraft", 10)

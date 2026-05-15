@@ -6,8 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/google/uuid"
 	"github.com/mitsuakki/minestrate/config"
+	"github.com/docker/go-connections/nat"
 )
 
 type Orchestrator struct {
@@ -16,6 +18,7 @@ type Orchestrator struct {
 	serversMutex sync.RWMutex
 	ports        *PortAllocator
 	networks     NetworkManager
+	docker       DockerClient
 	jobQueue     chan *Server
 }
 
@@ -23,7 +26,12 @@ func NewOrchestrator(cfg *config.Config, docker DockerClient) (*Orchestrator, er
 	var nm NetworkManager
 	var err error
 
-	switch cfg.Network.Mode {
+	mode := cfg.Network.Mode
+	if mode == "" {
+		mode = "simple"
+	}
+
+	switch mode {
 	case "simple":
 		nm = NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
 	case "isolated":
@@ -35,7 +43,7 @@ func NewOrchestrator(cfg *config.Config, docker DockerClient) (*Orchestrator, er
 		return nil, ErrInvalidNetworkMode
 	}
 
-	if cfg.Network.EnableFallback && cfg.Network.Mode == "isolated" {
+	if cfg.Network.EnableFallback && mode == "isolated" {
 		secondary := NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
 		nm = NewFallbackNetworkManager(nm, secondary)
 	}
@@ -45,7 +53,8 @@ func NewOrchestrator(cfg *config.Config, docker DockerClient) (*Orchestrator, er
 		servers:  make(map[string]*Server),
 		ports:    NewPortAllocator(cfg.Ports.RangeStart, cfg.Ports.RangeEnd),
 		networks: nm,
-		jobQueue: make(chan *Server, 100),
+		docker:   docker,
+		jobQueue: make(chan *Server, cfg.Orchestrator.Workers),
 	}
 
 	return o, nil
@@ -137,10 +146,57 @@ func (o *Orchestrator) StartWorkers() {
 func (o *Orchestrator) worker(id int) {
 	for s := range o.jobQueue {
 		fmt.Printf("Worker %d starting server %s\n", id, s.ID)
-		_ = s.Transition(EventStart)
 		
-		// Simulate startup
-		time.Sleep(100 * time.Millisecond)
-		_ = s.Transition(EventRun)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(o.cfg.Orchestrator.StartTimeout)*time.Second)
+		
+		err := o.processJob(ctx, s)
+		cancel()
+
+		if err != nil {
+			fmt.Printf("Worker %d failed to start server %s: %v\n", id, s.ID, err)
+			_ = s.Transition(EventStop)
+			// Resource cleanup is handled in StopServer if called by user, 
+			// but here we might need to remove from orchestrator map if it failed during startup
+			// and wasn't yet "Running".
+			o.serversMutex.Lock()
+			delete(o.servers, s.ID)
+			o.ports.Release(s.Port)
+			_ = o.networks.Release(context.Background(), s.ID)
+			o.serversMutex.Unlock()
+		}
 	}
+}
+
+func (o *Orchestrator) processJob(ctx context.Context, s *Server) error {
+	if err := s.Transition(EventStart); err != nil {
+		return err
+	}
+
+	// Create container
+	resp, err := o.docker.ContainerCreate(ctx, &container.Config{
+		Image: o.cfg.Docker.Image,
+		Labels: map[string]string{
+			"minestrate.server_id": s.ID,
+		},
+	}, &container.HostConfig{
+		NetworkMode: container.NetworkMode(s.Network.NetworkName),
+		PortBindings: nat.PortMap{
+			nat.Port("25565/tcp"): []nat.PortBinding{
+				{
+					HostIP:   "0.0.0.0",
+					HostPort: fmt.Sprintf("%d", s.Port),
+				},
+			},
+		},
+	}, nil, nil, s.ID)
+	if err != nil {
+		return err
+	}
+
+	// Start container
+	if err := o.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return err
+	}
+
+	return s.Transition(EventRun)
 }
