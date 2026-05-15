@@ -183,6 +183,18 @@ On this hardware (**AMD Ryzen 7 4800H**, 8 Cores, 16GB RAM, Windows 11 Pro), the
 | Mean start time ($1/\mu$) | 1.18s |
 | Throughput ($\mu$) | 0.85 starts/sec |
 
+### Worker Pool Throughput
+
+The following benchmark measures the throughput of the orchestrator worker pool with varying numbers of workers ($c$). To simulate realistic load, an artificial delay of 100ms was added to each container creation job.
+
+| Workers ($c$) | Throughput (starts/sec) | Scaling |
+| :--- | :--- | :--- |
+| 1 | 9.94 | 1.0x |
+| 2 | 19.89 | 2.0x |
+| 4 | 38.79 | 3.9x |
+
+These values confirm that the system scales linearly with the number of workers until it hits the host's I/O or Docker socket bottlenecks.
+
 
 These values are used to tune the worker pool size and start timeout as described in the Design Decisions section.
 

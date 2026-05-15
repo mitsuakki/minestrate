@@ -7,7 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/moby/moby/api/types/network"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 type mockDockerClient struct {
@@ -15,13 +17,13 @@ type mockDockerClient struct {
 	networks map[string]string // name -> subnet
 }
 
-func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateRequest) (network.CreateResponse, error) {
+func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.networks[name]; ok {
 		return network.CreateResponse{}, fmt.Errorf("network %s already exists", name)
 	}
-	m.networks[name] = options.IPAM.Config[0].Subnet.String()
+	m.networks[name] = options.IPAM.Config[0].Subnet
 	return network.CreateResponse{ID: name}, nil
 }
 
@@ -32,6 +34,14 @@ func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) 
 		return fmt.Errorf("network %s not found", networkID)
 	}
 	delete(m.networks, networkID)
+	return nil
+}
+
+func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
+	return container.CreateResponse{ID: containerName}, nil
+}
+
+func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
 	return nil
 }
 

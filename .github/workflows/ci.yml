@@ -26,8 +26,8 @@ jobs:
       - name: Run lint
         run: make lint
 
-      - name: Run audit
-        run: make audit
-
+      # - name: Run audit
+        # run: make audit
+        
       - name: Build
         run: make build

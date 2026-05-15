@@ -4,17 +4,20 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/netip"
 	"sync"
 	"sync/atomic"
 
-	"github.com/moby/moby/api/types/network"
-)
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	)
 
-type DockerClient interface {
-	NetworkCreate(ctx context.Context, name string, options network.CreateRequest) (network.CreateResponse, error)
+	type DockerClient interface {
+	NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error)
 	NetworkRemove(ctx context.Context, networkID string) error
-}
+	ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
+	ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error
+	}
 
 type NetworkConfig struct {
 	NetworkName string `json:"network_name"`
@@ -146,12 +149,12 @@ func (m *IsolatedSubnetManager) Allocate(ctx context.Context, gameID string) (*N
 				subnet := m.subnets[idx].String()
 				name := fmt.Sprintf("minestrate-net-%d", idx)
 
-				_, err := m.docker.NetworkCreate(ctx, name, network.CreateRequest{
+				_, err := m.docker.NetworkCreate(ctx, name, network.CreateOptions{
 					Driver: "bridge",
 					IPAM: &network.IPAM{
 						Config: []network.IPAMConfig{
 							{
-								Subnet: netip.MustParsePrefix(subnet),
+								Subnet: subnet,
 							},
 						},
 					},
@@ -185,8 +188,6 @@ func (m *IsolatedSubnetManager) Release(ctx context.Context, gameID string) erro
 		m.mu.Unlock()
 		return nil
 	}
-	delete(m.active, gameID)
-	delete(m.idToSubnet, gameID)
 	m.mu.Unlock()
 
 	idx, ok := m.subnetToIdx[subnet]
@@ -198,6 +199,11 @@ func (m *IsolatedSubnetManager) Release(ctx context.Context, gameID string) erro
 	if err := m.docker.NetworkRemove(ctx, name); err != nil {
 		return err
 	}
+
+	m.mu.Lock()
+	delete(m.active, gameID)
+	delete(m.idToSubnet, gameID)
+	m.mu.Unlock()
 
 	m.releaseIndex(idx)
 	return nil
