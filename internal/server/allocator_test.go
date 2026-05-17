@@ -37,6 +37,10 @@ func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) 
 	return nil
 }
 
+func (m *mockDockerClient) NetworkInspect(ctx context.Context, networkID string, options network.InspectOptions) (network.Inspect, error) {
+	return network.Inspect{}, nil
+}
+
 func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
 	return container.CreateResponse{ID: containerName}, nil
 }

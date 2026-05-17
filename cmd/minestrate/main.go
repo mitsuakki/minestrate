@@ -30,6 +30,9 @@ func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, optio
 func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) error {
 	return nil
 }
+func (m *mockDockerClient) NetworkInspect(ctx context.Context, networkID string, options network.InspectOptions) (network.Inspect, error) {
+	return network.Inspect{}, nil
+}
 func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
 	return container.CreateResponse{ID: containerName}, nil
 }
@@ -83,15 +86,20 @@ func main() {
 
 	r := chi.NewRouter()
 
+	fmt.Printf("Docker socket: %q\n", cfg.Docker.Socket)
+	fmt.Printf("Env: %q\n", cfg.Env)
+
 	var dockerClient server.DockerClient
 	if cfg.Env == "dev" && cfg.Docker.Socket == "" {
 		dockerClient = &mockDockerClient{}
 	} else {
+		opts := []client.Opt{client.WithAPIVersionNegotiation()}
+		if cfg.Docker.Socket != "" {
+			opts = append(opts, client.WithHost(cfg.Docker.Socket))
+		}
+
 		var err error
-		dockerClient, err = client.NewClientWithOpts(
-			client.WithHost(cfg.Docker.Socket),
-			client.WithAPIVersionNegotiation(),
-		)
+		dockerClient, err = client.NewClientWithOpts(opts...)
 		if err != nil {
 			log.Fatalf("failed to create docker client: %v", err)
 		}

@@ -33,6 +33,12 @@ func NewOrchestrator(cfg *config.Config, docker DockerClient) (*Orchestrator, er
 
 	switch mode {
 	case "simple":
+		if mode == "simple" {
+			if err := EnsureNetwork(context.Background(), docker, cfg.Network.DefaultNetwork); err != nil {
+				return nil, fmt.Errorf("failed to ensure network %q: %w", cfg.Network.DefaultNetwork, err)
+			}
+		}
+		
 		nm = NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
 	case "isolated":
 		nm, err = NewIsolatedSubnetManager(docker, cfg.Network.SubnetBlock)
@@ -88,10 +94,12 @@ func (o *Orchestrator) CreateServer(ctx context.Context, game string, players in
 	o.servers[id] = s
 	o.serversMutex.Unlock()
 
+	fmt.Printf("About to send job %s to queue (len=%d cap=%d)\n", s.ID, len(o.jobQueue), cap(o.jobQueue))
 	select {
 	case o.jobQueue <- s:
+		fmt.Printf("Job sent: %s\n", id)
 		return s, nil
-	default:
+	case <-ctx.Done():
 		// Cleanup if queue is full
 		o.serversMutex.Lock()
 		delete(o.servers, id)
@@ -198,6 +206,7 @@ func (o *Orchestrator) StartWorkers() {
 }
 
 func (o *Orchestrator) worker(id int) {
+	fmt.Printf("Worker %d started\n", id)
 	for s := range o.jobQueue {
 		fmt.Printf("Worker %d starting server %s\n", id, s.ID)
 		
@@ -205,6 +214,7 @@ func (o *Orchestrator) worker(id int) {
 		
 		err := o.processJob(ctx, s)
 		cancel()
+		fmt.Printf("processJob result for %s: %v\n", s.ID, err)
 
 		if err != nil {
 			fmt.Printf("Worker %d failed to start server %s: %v\n", id, s.ID, err)
@@ -227,6 +237,7 @@ func (o *Orchestrator) processJob(ctx context.Context, s *Server) error {
 	}
 
 	// Create container
+	fmt.Printf("Attempting to create container for server %s with image %s\n", s.ID, o.cfg.Docker.Image)
 	resp, err := o.docker.ContainerCreate(ctx, &container.Config{
 		Image: o.cfg.Docker.Image,
 		Labels: map[string]string{
@@ -235,7 +246,7 @@ func (o *Orchestrator) processJob(ctx context.Context, s *Server) error {
 	}, &container.HostConfig{
 		NetworkMode: container.NetworkMode(s.Network.NetworkName),
 		PortBindings: nat.PortMap{
-			nat.Port("25565/tcp"): []nat.PortBinding{
+			nat.Port("19132/udp"): []nat.PortBinding{
 				{
 					HostIP:   "0.0.0.0",
 					HostPort: fmt.Sprintf("%d", s.Port),
@@ -243,14 +254,20 @@ func (o *Orchestrator) processJob(ctx context.Context, s *Server) error {
 			},
 		},
 	}, nil, nil, s.ID)
+	fmt.Printf("ContainerCreate resp: %+v, err: %v\n", resp, err)
+
 	if err != nil {
+		fmt.Printf("Failed to create container for server %s: %v\n", s.ID, err)
 		return err
 	}
+	fmt.Printf("Successfully created container %s for server %s\n", resp.ID, s.ID)
 
 	// Start container
 	if err := o.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		fmt.Printf("ContainerStart err: %v\n", err)
 		return err
 	}
+	fmt.Printf("ContainerStart err: %v\n", err)
 
 	return s.Transition(EventRun)
 }
