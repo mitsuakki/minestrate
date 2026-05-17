@@ -9,30 +9,10 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/mitsuakki/minestrate/config"
+	"github.com/mitsuakki/minestrate/internal/auth"
+	"github.com/mitsuakki/minestrate/internal/config"
 	"github.com/mitsuakki/minestrate/internal/server"
 )
-
-type mockDockerClient struct{}
-
-func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error) {
-	return network.CreateResponse{ID: name}, nil
-}
-func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) error {
-	return nil
-}
-func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
-	return container.CreateResponse{ID: containerName}, nil
-}
-func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
-	return nil
-}
-func (m *mockDockerClient) ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error {
-	return nil
-}
 
 func setupTestHandler() *Handler {
 	cfg := &config.Config{}
@@ -43,11 +23,12 @@ func setupTestHandler() *Handler {
 	cfg.Network.Mode = "simple"
 	cfg.Network.DefaultNetwork = "test-net"
 
-	o, err := server.NewOrchestrator(cfg, &mockDockerClient{})
+	o, err := server.NewOrchestrator(cfg, &server.MockDockerClient{})
 	if err != nil {
 		panic(err)
 	}
-	return NewHandler(o)
+	rm := auth.NewRefreshManager("test-secret")
+	return NewHandler(o, rm)
 }
 
 func TestCreateServer(t *testing.T) {
@@ -197,4 +178,37 @@ func TestDeleteServer(t *testing.T) {
 			t.Errorf("expected status 404, got %d", w.Code)
 		}
 	})
+}
+
+func TestRefreshToken(t *testing.T) {
+	h := setupTestHandler()
+	
+	// Generate a valid refresh token
+	refreshToken, err := h.refreshManager.GenerateToken("test-user")
+	if err != nil {
+		t.Fatalf("failed to generate refresh token: %v", err)
+	}
+
+	reqBody := map[string]string{"refresh_token": refreshToken}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+
+	h.RefreshToken(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", res.StatusCode)
+	}
+
+	var respBody map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&respBody); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if _, ok := respBody["access_token"]; !ok {
+		t.Fatal("access_token not found in response")
+	}
 }

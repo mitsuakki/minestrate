@@ -8,7 +8,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/google/uuid"
-	"github.com/mitsuakki/minestrate/config"
+	"github.com/mitsuakki/minestrate/internal/config"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -33,6 +33,12 @@ func NewOrchestrator(cfg *config.Config, docker DockerClient) (*Orchestrator, er
 
 	switch mode {
 	case "simple":
+		if mode == "simple" {
+			if err := EnsureNetwork(context.Background(), docker, cfg.Network.DefaultNetwork); err != nil {
+				return nil, fmt.Errorf("failed to ensure network %q: %w", cfg.Network.DefaultNetwork, err)
+			}
+		}
+		
 		nm = NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
 	case "isolated":
 		nm, err = NewIsolatedSubnetManager(docker, cfg.Network.SubnetBlock)
@@ -88,16 +94,24 @@ func (o *Orchestrator) CreateServer(ctx context.Context, game string, players in
 	o.servers[id] = s
 	o.serversMutex.Unlock()
 
-	select {
-	case o.jobQueue <- s:
-		return s, nil
-	default:
-		// Cleanup if queue is full
+	cleanup := func() {
 		o.serversMutex.Lock()
 		delete(o.servers, id)
 		o.serversMutex.Unlock()
 		o.ports.Release(port)
 		_ = o.networks.Release(ctx, id)
+	}
+
+	fmt.Printf("About to send job %s to queue (len=%d cap=%d)\n", s.ID, len(o.jobQueue), cap(o.jobQueue))
+	select {
+	case o.jobQueue <- s:
+		fmt.Printf("Job sent: %s\n", id)
+		return s, nil
+	case <-ctx.Done():
+		cleanup()
+		return nil, ctx.Err()
+	default:
+		cleanup()
 		return nil, ErrJobQueueFull
 	}
 }
@@ -142,7 +156,8 @@ func (o *Orchestrator) ShutdownServer(ctx context.Context, id string) error {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		_ = o.docker.ContainerStop(cleanupCtx, s.ID, container.StopOptions{})
+		containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
+		_ = o.docker.ContainerStop(cleanupCtx, containerName, container.StopOptions{})
 		
 		o.ports.Release(s.Port)
 		_ = o.networks.Release(cleanupCtx, s.ID)
@@ -227,6 +242,8 @@ func (o *Orchestrator) processJob(ctx context.Context, s *Server) error {
 	}
 
 	// Create container
+	containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
+	fmt.Printf("Attempting to create container for server %s (name: %s) with image %s\n", s.ID, containerName, o.cfg.Docker.Image)
 	resp, err := o.docker.ContainerCreate(ctx, &container.Config{
 		Image: o.cfg.Docker.Image,
 		Labels: map[string]string{
@@ -235,17 +252,20 @@ func (o *Orchestrator) processJob(ctx context.Context, s *Server) error {
 	}, &container.HostConfig{
 		NetworkMode: container.NetworkMode(s.Network.NetworkName),
 		PortBindings: nat.PortMap{
-			nat.Port("25565/tcp"): []nat.PortBinding{
+			nat.Port("19132/udp"): []nat.PortBinding{
 				{
 					HostIP:   "0.0.0.0",
 					HostPort: fmt.Sprintf("%d", s.Port),
 				},
 			},
 		},
-	}, nil, nil, s.ID)
+	}, nil, nil, containerName)
+
 	if err != nil {
+		fmt.Printf("Failed to create container for server %s: %v\n", s.ID, err)
 		return err
 	}
+	fmt.Printf("Successfully created container %s for server %s\n", resp.ID, s.ID)
 
 	// Start container
 	if err := o.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {

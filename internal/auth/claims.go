@@ -6,3 +6,7 @@ type Claims struct {
 	Scope []string `json:"scope"`
 	jwt.RegisteredClaims
 }
+
+type RefreshClaims struct {
+	jwt.RegisteredClaims
+}

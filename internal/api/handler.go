@@ -5,17 +5,60 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/mitsuakki/minestrate/internal/auth"
 	"github.com/mitsuakki/minestrate/internal/server"
 )
 
 type Handler struct {
-	orchestrator *server.Orchestrator
+	orchestrator   *server.Orchestrator
+	refreshManager *auth.RefreshManager
 }
 
-func NewHandler(o *server.Orchestrator) *Handler {
-	return &Handler{orchestrator: o}
+func NewHandler(o *server.Orchestrator, rm *auth.RefreshManager) *Handler {
+	return &Handler{orchestrator: o, refreshManager: rm}
+}
+
+func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	subject, err := h.refreshManager.ValidateToken(req.RefreshToken)
+	if err != nil {
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	claims := &auth.Claims{
+		Scope: []string{"server:create"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   subject,
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(h.refreshManager.GetSecret()))
+	if err != nil {
+		http.Error(w, "failed to generate token", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"access_token": signed,
+	})
 }
 
 func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {

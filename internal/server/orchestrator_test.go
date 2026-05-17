@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mitsuakki/minestrate/config"
+	"github.com/mitsuakki/minestrate/internal/config"
 )
 
 func mockConfig() *config.Config {
