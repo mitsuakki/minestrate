@@ -8,7 +8,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/google/uuid"
-	"github.com/mitsuakki/minestrate/config"
+	"github.com/mitsuakki/minestrate/internal/config"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -94,18 +94,24 @@ func (o *Orchestrator) CreateServer(ctx context.Context, game string, players in
 	o.servers[id] = s
 	o.serversMutex.Unlock()
 
+	cleanup := func() {
+		o.serversMutex.Lock()
+		delete(o.servers, id)
+		o.serversMutex.Unlock()
+		o.ports.Release(port)
+		_ = o.networks.Release(ctx, id)
+	}
+
 	fmt.Printf("About to send job %s to queue (len=%d cap=%d)\n", s.ID, len(o.jobQueue), cap(o.jobQueue))
 	select {
 	case o.jobQueue <- s:
 		fmt.Printf("Job sent: %s\n", id)
 		return s, nil
 	case <-ctx.Done():
-		// Cleanup if queue is full
-		o.serversMutex.Lock()
-		delete(o.servers, id)
-		o.serversMutex.Unlock()
-		o.ports.Release(port)
-		_ = o.networks.Release(ctx, id)
+		cleanup()
+		return nil, ctx.Err()
+	default:
+		cleanup()
 		return nil, ErrJobQueueFull
 	}
 }
@@ -150,7 +156,8 @@ func (o *Orchestrator) ShutdownServer(ctx context.Context, id string) error {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		_ = o.docker.ContainerStop(cleanupCtx, s.ID, container.StopOptions{})
+		containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
+		_ = o.docker.ContainerStop(cleanupCtx, containerName, container.StopOptions{})
 		
 		o.ports.Release(s.Port)
 		_ = o.networks.Release(cleanupCtx, s.ID)
@@ -206,7 +213,6 @@ func (o *Orchestrator) StartWorkers() {
 }
 
 func (o *Orchestrator) worker(id int) {
-	fmt.Printf("Worker %d started\n", id)
 	for s := range o.jobQueue {
 		fmt.Printf("Worker %d starting server %s\n", id, s.ID)
 		
@@ -214,7 +220,6 @@ func (o *Orchestrator) worker(id int) {
 		
 		err := o.processJob(ctx, s)
 		cancel()
-		fmt.Printf("processJob result for %s: %v\n", s.ID, err)
 
 		if err != nil {
 			fmt.Printf("Worker %d failed to start server %s: %v\n", id, s.ID, err)
@@ -237,7 +242,8 @@ func (o *Orchestrator) processJob(ctx context.Context, s *Server) error {
 	}
 
 	// Create container
-	fmt.Printf("Attempting to create container for server %s with image %s\n", s.ID, o.cfg.Docker.Image)
+	containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
+	fmt.Printf("Attempting to create container for server %s (name: %s) with image %s\n", s.ID, containerName, o.cfg.Docker.Image)
 	resp, err := o.docker.ContainerCreate(ctx, &container.Config{
 		Image: o.cfg.Docker.Image,
 		Labels: map[string]string{
@@ -253,8 +259,7 @@ func (o *Orchestrator) processJob(ctx context.Context, s *Server) error {
 				},
 			},
 		},
-	}, nil, nil, s.ID)
-	fmt.Printf("ContainerCreate resp: %+v, err: %v\n", resp, err)
+	}, nil, nil, containerName)
 
 	if err != nil {
 		fmt.Printf("Failed to create container for server %s: %v\n", s.ID, err)
@@ -264,10 +269,8 @@ func (o *Orchestrator) processJob(ctx context.Context, s *Server) error {
 
 	// Start container
 	if err := o.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		fmt.Printf("ContainerStart err: %v\n", err)
 		return err
 	}
-	fmt.Printf("ContainerStart err: %v\n", err)
 
 	return s.Transition(EventRun)
 }

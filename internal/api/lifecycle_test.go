@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,35 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/go-chi/chi/v5"
-	"github.com/mitsuakki/minestrate/config"
+	"github.com/mitsuakki/minestrate/internal/config"
 	"github.com/mitsuakki/minestrate/internal/api"
+	"github.com/mitsuakki/minestrate/internal/auth"
 	"github.com/mitsuakki/minestrate/internal/server"
 )
-
-type mockDockerClient struct{}
-
-func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error) {
-	return network.CreateResponse{ID: name}, nil
-}
-func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) error {
-	return nil
-}
-func (m *mockDockerClient) NetworkInspect(ctx context.Context, networkID string, options network.InspectOptions) (network.Inspect, error) {
-	return network.Inspect{}, nil
-}
-func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
-	return container.CreateResponse{ID: containerName}, nil
-}
-func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
-	return nil
-}
-func (m *mockDockerClient) ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error {
-	return nil
-}
 
 func TestServerLifecycle_Integration(t *testing.T) {
 	// Note: The address returned is the host IP, not the container IP.
@@ -53,12 +29,13 @@ func TestServerLifecycle_Integration(t *testing.T) {
 	cfg.Network.Mode = "simple"
 	cfg.Network.DefaultNetwork = "test-net"
 
-	orchestrator, err := server.NewOrchestrator(cfg, &mockDockerClient{})
+	orchestrator, err := server.NewOrchestrator(cfg, &server.MockDockerClient{})
 	if err != nil {
 		t.Fatalf("Failed to create orchestrator: %v", err)
 	}
 	orchestrator.StartWorkers()
-	h := api.NewHandler(orchestrator)
+	refreshManager := auth.NewRefreshManager("test-secret")
+	h := api.NewHandler(orchestrator, refreshManager)
 
 	r := chi.NewRouter()
 	r.Post("/servers", h.CreateServer)
